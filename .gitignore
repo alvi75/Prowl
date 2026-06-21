@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# py2app build artifacts
+build/
+dist/
+
+# generated icon intermediates (icon.icns is committed; these are regenerated)
+icon.iconset/
+icon_1024.png
+
+# misc
+.DS_Store
+/tmp/
