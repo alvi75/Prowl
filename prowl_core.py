@@ -48,12 +48,17 @@ def can_move():
     back, then restore. A no-op visually, but it proves we can move the pointer.
     """
     try:
+        w, h = screen_size()
         x, y = cursor_position()
-        post_move(x + 1, y + 1)
+        # nudge toward the screen interior so the OS doesn't clamp the move
+        # when the cursor is sitting at an edge/corner (would false-negative)
+        dx = 1 if x < w - 2 else -1
+        dy = 1 if y < h - 2 else -1
+        post_move(x + dx, y + dy)
         time.sleep(0.05)
         nx, ny = cursor_position()
         post_move(x, y)                       # restore
-        return (round(nx), round(ny)) == (round(x + 1), round(y + 1))
+        return (round(nx), round(ny)) == (round(x + dx), round(y + dy))
     except Exception:
         return False
 
@@ -94,25 +99,39 @@ class ProwlEngine:
         self._thread = None
         self.started_at = None
         self.cycles = 0
+        self.last_status = "Stopped"
 
     @property
     def running(self):
-        return self._thread is not None and self._thread.is_alive()
+        # "running" means a live thread that hasn't been asked to stop. Once
+        # stop() is called we report False immediately, even while the worker
+        # winds down — so the UI flips right away and a restart isn't blocked.
+        return (self._thread is not None and self._thread.is_alive()
+                and self._stop is not None and not self._stop.is_set())
 
     def start(self):
         if self.running:
             return
+        # a previous run may still be winding down — signal and wait for it so
+        # the restart always takes effect (fixes "Start does nothing after Stop")
+        if self._thread is not None and self._thread.is_alive():
+            if self._stop is not None:
+                self._stop.set()
+            self._thread.join(timeout=2.0)
         self._stop = threading.Event()
         self.cycles = 0
         self.started_at = time.time()
+        self.last_status = "Starting…"
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def stop(self):
         if self._stop:
             self._stop.set()
+        self.last_status = "Stopped"
 
     def _status(self, text):
+        self.last_status = text
         try:
             self.on_status(text)
         except Exception:

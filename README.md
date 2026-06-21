@@ -26,10 +26,11 @@ often enough to keep things alive. Take a shower, grab coffee, leave it running.
 |---|---|---|
 | 🖥️ **Window** | `prowl_window.py` | A clear Start/Stop window with a live timer |
 | 📌 **Menu-bar widget** | `prowl_menubar.py` | Quiet "set & forget" — lives in the menu bar |
-| 📦 **Prowl.app** | `dist/Prowl.app` | Sharing with colleagues — no Python needed |
+| 📦 **Prowl.app** | built via `build_app.sh` → `dist/Prowl.app` | Sharing with colleagues — no Python needed |
 
 The packaged **Prowl.app** is the menu-bar widget — double-clickable, with an
-icon, ready to hand to teammates.
+icon, ready to hand to teammates. It isn't committed to the repo (it's an 81 MB
+bundle); run `./build_app.sh` to produce `dist/Prowl.app`, then share that.
 
 ---
 
@@ -54,29 +55,43 @@ python3 prowl_menubar.py     # menu-bar 🐭 icon
 macOS silently ignores programmatic cursor movement until you grant
 **Accessibility** access:
 
-> **System Settings → Privacy & Security → Accessibility** → enable the app that
-> runs Prowl (your Terminal when running from source, or **Prowl** itself when
-> using Prowl.app). If it's already listed, toggle it off→on.
+**To grant it:**
+1. **System Settings → Privacy & Security → Accessibility**.
+2. Click the **`+`** under the list → choose the app (your **Terminal** when
+   running from source, or **Prowl** when using Prowl.app) → **Open**.
+3. Make sure its switch is **ON**.
+4. **Quit and reopen** the app — the permission only takes effect on a fresh
+   launch.
 
 Symptom if not granted: Prowl runs with no error but the cursor never moves.
 The apps detect this and tell you.
 
-> **Security note:** Accessibility is a *local* capability — it does **not** open
-> a network port or let anyone in remotely. The only real risk is running
-> untrusted code in a Terminal that has it; Prowl's source is short and readable.
+> **Heads-up (Prowl.app):** because the app is only ad-hoc signed, macOS ties the
+> permission to the exact build. **After rebuilding/updating Prowl.app you must
+> re-grant Accessibility** (remove it from the list with `–`, then re-add). A
+> signed/notarized release would fix this (see roadmap).
+
+> **Security note:** Accessibility is a powerful local capability (it can
+> synthesize input across apps), but it is **local only** — it opens no network
+> port and lets no one in remotely. Prowl makes **no network connections** and
+> uses it solely to move the cursor; the source is short and readable. The only
+> real risk is running untrusted code in a Terminal that has the permission.
 
 ---
 
 ## For colleagues — installing Prowl.app
 
 1. Copy **`Prowl.app`** to `/Applications` (or anywhere).
-2. First launch: because the app isn't notarized by Apple, right-click it →
-   **Open** → **Open** (only needed once). If macOS says it's "damaged", run:
+2. Because the app isn't notarized by Apple, clear the download quarantine first
+   (most reliable on modern macOS):
    ```bash
    xattr -dr com.apple.quarantine /Applications/Prowl.app
    ```
-3. Grant **Accessibility** (see above) — the app will appear as **Prowl** in the
-   list. Reopen it.
+   Then open it. (Alternatively: try to open it, then go to **System Settings →
+   Privacy & Security**, scroll to *"Prowl was blocked"* → **Open Anyway**.
+   On macOS Sequoia the old right-click→Open trick no longer works.)
+3. Grant **Accessibility** (see above) — add **Prowl** with the `+` button, turn
+   it ON, then reopen.
 4. A 🐭 appears in the menu bar. Click it → **Start Prowling**. It turns into 🐾
    while active. Pick an interval, or **Quit** from the same menu.
 

@@ -2,13 +2,15 @@
 """
 Prowl — menu-bar widget edition.
 
-Lives quietly in the macOS menu bar as a small icon. Click it for a menu:
-  ▶ Start Prowling / ■ Stop, a live status line, interval choices, and Quit.
-While running it gently moves the cursor every minute so your Mac stays awake.
-Never clicks anything.
+Lives quietly in the macOS menu bar. Click it for a menu: Start/Stop, a live
+status line, interval choices, and Quit. While running it gently moves the
+cursor every minute so your Mac stays awake. Never clicks anything.
 
 Run:  python3 prowl_menubar.py
-(For colleagues: use the bundled Prowl.app instead — no Python needed.)
+
+Threading note: ALL menu/title updates happen on the main thread via a
+rumps.Timer that polls the engine. The engine's background worker never touches
+AppKit — doing so would freeze the menu (Start/Stop/Quit stop responding).
 """
 
 import rumps
@@ -22,9 +24,10 @@ RUN_TITLE = "🐾"         # menu-bar glyph while prowling
 class ProwlApp(rumps.App):
     def __init__(self):
         super().__init__("Prowl", title=IDLE_TITLE, quit_button=None)
-        self.engine = ProwlEngine(on_status=self._on_status)
+        self.engine = ProwlEngine()          # NO cross-thread callback
+        self.want_running = False            # user intent
 
-        self.toggle_item = rumps.MenuItem("▶ Start Prowling", callback=self.toggle)
+        self.toggle_item = rumps.MenuItem("Start Prowling", callback=self.toggle)
         self.status_item = rumps.MenuItem("Status: stopped", callback=None)
         self.interval_menu = rumps.MenuItem("Interval")
         for secs in (30, 60, 120, 300):
@@ -46,9 +49,12 @@ class ProwlApp(rumps.App):
             self.status_item.title = "Status: grant Accessibility →"
             rumps.notification(
                 "Prowl needs permission",
-                "Enable Accessibility for this app",
-                "System Settings → Privacy & Security → Accessibility, "
-                "then reopen Prowl.")
+                "Enable Accessibility, then reopen Prowl",
+                "System Settings → Privacy & Security → Accessibility.")
+
+        # main-thread UI refresher (thread-safe). 0.5s cadence.
+        self._timer = rumps.Timer(self._refresh, 0.5)
+        self._timer.start()
 
     # ---- interval handling ----
     def _make_interval_setter(self, secs):
@@ -63,28 +69,35 @@ class ProwlApp(rumps.App):
             secs = int(base[:-1]) if base.endswith("s") else int(base.split()[0]) * 60
             item.title = ("✓ " if secs == int(self.engine.interval) else "") + base
 
-    # ---- status / toggle ----
-    def _on_status(self, text):
-        self.status_item.title = f"Status: {text}"
-        self.title = RUN_TITLE if self.engine.running else IDLE_TITLE
+    # ---- main-thread UI refresh (the ONLY place title/menu are updated) ----
+    def _refresh(self, _):
+        if self.engine.running:
+            self.title = f"{RUN_TITLE} {self.engine.cycles}"
+            self.toggle_item.title = "Stop Prowling"
+            self.status_item.title = f"Status: {self.engine.last_status}"
+        else:
+            self.title = IDLE_TITLE
+            self.toggle_item.title = "Start Prowling"
+            self.status_item.title = "Status: stopped"
 
+    # ---- toggle (main thread; only sets intent + drives engine) ----
     def toggle(self, _):
         if self.engine.running:
+            self.want_running = False
             self.engine.stop()
-            self.toggle_item.title = "▶ Start Prowling"
-            self.title = IDLE_TITLE
-            self.status_item.title = "Status: stopped"
         else:
             if not can_move():
-                rumps.alert("Accessibility needed",
-                            "Enable Prowl under System Settings → Privacy & "
-                            "Security → Accessibility, then reopen Prowl.")
+                rumps.alert(
+                    "Accessibility needed",
+                    "Enable Prowl under System Settings → Privacy & Security "
+                    "→ Accessibility, then reopen Prowl.")
                 return
+            self.want_running = True
             self.engine.start()
-            self.toggle_item.title = "■ Stop Prowling"
-            self.title = RUN_TITLE
+        self._refresh(None)
 
     def quit(self, _):
+        self.want_running = False
         self.engine.stop()
         rumps.quit_application()
 
