@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Render a professional product-launch video for Prowl (1920x1080, 30fps) with a
-synced voiceover (macOS `say`), Avenir Next typography, the real 🐭/🐾 emoji,
-and the live spin counter.
+Render a punchy, kinetic product-launch video for Prowl (1920x1080, 30fps):
+pop/overshoot typography, a drifting glow background, the real 🐭/🐾 + live spin
+counter, a synced voiceover (macOS `say`), and an Electro House music bed ducked
+under the narration.
 
-    python3 make_video.py        # -> prowl_launch.mp4  (with narration)
-
-Pipeline: generate per-scene narration audio, measure each clip, lay out scenes
-to match, render frames with PIL piped to ffmpeg, mux the voiceover track.
+    python3 make_video.py        # -> prowl_launch.mp4
 """
 import math
 import os
@@ -23,23 +21,29 @@ AV = "/System/Library/Fonts/Avenir Next.ttc"
 AV_BOLD, AV_BOLDIT, AV_DEMI, AV_DEMIIT, AV_IT, AV_MED, AV_MEDIT, AV_REG = range(8)
 EMOJI = "/System/Library/Fonts/Apple Color Emoji.ttc"
 
+LOOPS = "/Library/Audio/Apple Loops/Apple/02 Electro House"
+BEAT = f"{LOOPS}/Blueprint Beat 01.caf"
+BASS = f"{LOOPS}/Bedrock Bass.caf"
+SYNTH = f"{LOOPS}/Big Anthem Synth.caf"
+
 ACCENT = (110, 200, 255)
+HOT = (255, 120, 170)
 GREEN = (64, 210, 130)
 RED = (240, 100, 96)
-WHITE = (245, 247, 252)
-SUB = (150, 154, 178)
+WHITE = (246, 248, 252)
+SUB = (155, 159, 184)
 
-# ---- narration (one line per scene) ----
+# ---- punchy narration (one line per scene) ----
 NARRATION = [
-    "Meet Prowl.",
-    "Step away, and your Mac drifts to sleep. S S H sessions drop. Background tasks die.",
-    "Prowl keeps it awake — a gentle nudge of the cursor, every minute. Never a click.",
-    "It lives in your menu bar. Start it, and watch every spin count. One. Two. Three.",
-    "Run it as a clean window, or share it with your whole team.",
-    "Prowl. Keeps your Mac awake.",
+    "Meet Prowl!",
+    "You grab a coffee… and bam — your Mac konks out. S S H drops. Work, gone.",
+    "Prowl's got your back. A sneaky little cursor wiggle, every minute. Never clicks a thing.",
+    "This cute mouse lives in your menu bar. Hit start, and watch it rack up the spins. One! Two! Three!",
+    "Window, menu bar, or hand it to the whole crew. However you roll.",
+    "Prowl. Keep your Mac wide awake!",
 ]
 SCENE_NAMES = ["intro", "problem", "solution", "menubar", "options", "outro"]
-PAD = [0.9, 0.7, 0.8, 1.0, 0.8, 1.8]   # trailing silence/breeze per scene
+PAD = [0.6, 0.45, 0.6, 0.9, 0.5, 1.5]
 
 
 # ---------- fonts ----------
@@ -60,20 +64,30 @@ def emoji_img(char, target):
         tmp = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
         ImageDraw.Draw(tmp).text((8, 8), char, font=f, embedded_color=True)
         crop = tmp.crop(tmp.getbbox())
-        scale = target / crop.height
-        _emoji[key] = crop.resize((max(1, int(crop.width * scale)), target),
-                                   Image.LANCZOS)
+        sc = target / crop.height
+        _emoji[key] = crop.resize((max(1, int(crop.width * sc)), target), Image.LANCZOS)
     return _emoji[key]
 
 
-# ---------- helpers ----------
+# ---------- easing ----------
 def ease(t):
     t = max(0.0, min(1.0, t))
     return t * t * (3 - 2 * t)
 
 
-def fade(s, D, start=0.0, fin=0.5, fout=0.6):
-    """Element alpha 0..1 within a scene of length D, appearing at `start`."""
+def pop_scale(local_s, appear, dur=0.42):
+    """easeOutBack — overshoots past 1 then settles, for a lively 'pop'."""
+    x = (local_s - appear) / dur
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    c1, = (1.70158,)
+    c3 = c1 + 1
+    return 1 + c3 * (x - 1) ** 3 + c1 * (x - 1) ** 2
+
+
+def fade(s, D, start=0.0, fin=0.4, fout=0.5):
     if s < start:
         return 0.0
     a = min(1.0, (s - start) / fin) if fin else 1.0
@@ -81,25 +95,35 @@ def fade(s, D, start=0.0, fin=0.5, fout=0.6):
     return max(0.0, min(a, b))
 
 
+# ---------- background + drifting glows ----------
 def make_bg():
-    top, bot = (30, 33, 60), (9, 10, 17)
+    top, bot = (26, 28, 54), (8, 8, 15)
     img = Image.new("RGB", (W, H))
     px = img.load()
     for y in range(H):
         f = y / (H - 1)
-        px_row = (int(top[0] + (bot[0] - top[0]) * f),
-                  int(top[1] + (bot[1] - top[1]) * f),
-                  int(top[2] + (bot[2] - top[2]) * f))
+        row = (int(top[0] + (bot[0] - top[0]) * f),
+               int(top[1] + (bot[1] - top[1]) * f),
+               int(top[2] + (bot[2] - top[2]) * f))
         for x in range(W):
-            px[x, y] = px_row
-    glow = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(glow).ellipse([W // 2 - 760, -360, W // 2 + 760, 720], fill=70)
-    glow = glow.filter(ImageFilter.GaussianBlur(240))
-    img = Image.composite(Image.new("RGB", (W, H), (64, 86, 150)), img, glow)
+            px[x, y] = row
     return img.convert("RGBA")
 
 
+def make_glow(radius, color):
+    size = radius * 2
+    g = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(g).ellipse([size * 0.18, size * 0.18, size * 0.82, size * 0.82],
+                              fill=130)
+    g = g.filter(ImageFilter.GaussianBlur(size * 0.13))
+    sprite = Image.new("RGBA", (size, size), color + (0,))
+    sprite.putalpha(g)
+    return sprite
+
+
 BG = make_bg()
+GLOW_B = make_glow(560, (70, 130, 255))
+GLOW_P = make_glow(460, (150, 70, 220))
 ICON = Image.open(os.path.join(HERE, "icon_1024.png")).convert("RGBA")
 _icon = {}
 def icon_at(size):
@@ -114,9 +138,9 @@ def text_img(s, fnt, fill):
     if key not in _text_cache:
         dummy = Image.new("RGBA", (10, 10))
         bb = ImageDraw.Draw(dummy).textbbox((0, 0), s, font=fnt)
-        w, h = bb[2] - bb[0] + 8, bb[3] - bb[1] + 8
+        w, h = bb[2] - bb[0] + 10, bb[3] - bb[1] + 10
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        ImageDraw.Draw(img).text((4 - bb[0], 4 - bb[1]), s, font=fnt, fill=fill + (255,))
+        ImageDraw.Draw(img).text((5 - bb[0], 5 - bb[1]), s, font=fnt, fill=fill + (255,))
         _text_cache[key] = img
     return _text_cache[key]
 
@@ -133,9 +157,18 @@ def paste_alpha(base, img, center, alpha):
                                int(center[1] - img.height / 2)))
 
 
-def text(base, center, s, fnt, fill, alpha):
+def paste_scaled(base, img, center, alpha, scale):
+    if alpha <= 0 or scale <= 0.01:
+        return
+    if abs(scale - 1.0) > 0.01:
+        img = img.resize((max(1, int(img.width * scale)),
+                          max(1, int(img.height * scale))), Image.LANCZOS)
+    paste_alpha(base, img, center, alpha)
+
+
+def text(base, center, s, fnt, fill, alpha, scale=1.0):
     if alpha > 0:
-        paste_alpha(base, text_img(s, fnt, fill), center, alpha)
+        paste_scaled(base, text_img(s, fnt, fill), center, alpha, scale)
 
 
 def cursor(base, x, y, scale, alpha):
@@ -155,13 +188,13 @@ def trail(base, path_fn, u, alpha):
         return
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    for i in range(20):
-        uu = u - i * 0.011
+    for i in range(22):
+        uu = u - i * 0.010
         if uu < 0:
             break
         px, py = path_fn(uu)
-        a = int(alpha * (1 - i / 20) * 0.5)
-        r = 5 + (1 - i / 20) * 9
+        a = int(alpha * (1 - i / 22) * 0.55)
+        r = 5 + (1 - i / 22) * 10
         d.ellipse([px - r, py - r, px + r, py + r], fill=ACCENT + (a,))
     base.alpha_composite(layer.filter(ImageFilter.GaussianBlur(3)))
 
@@ -187,8 +220,7 @@ def menu_dropdown(base, x, y, alpha, cycle):
                    fill=(255, 255, 255, int(0.12 * alpha)))
             cy += 18
             continue
-        tx, col = x + 24, (232, 233, 244)
-        mid = cy + rh / 2
+        tx, col, mid = x + 24, (232, 233, 244), cy + rh / 2
         if kind == "start":
             d.rounded_rectangle([x + 8, cy + 4, x + pw - 8, cy + rh - 8],
                                 radius=10, fill=ACCENT + (int(0.92 * alpha),))
@@ -206,7 +238,7 @@ def menu_dropdown(base, x, y, alpha, cycle):
     base.alpha_composite(layer)
 
 
-def window_mock(base, cx, cy, alpha, running=True, cyc=2):
+def window_mock(base, cx, cy, alpha, cyc=2):
     if alpha <= 0:
         return
     w, h = 520, 360
@@ -217,21 +249,17 @@ def window_mock(base, cx, cy, alpha, running=True, cyc=2):
                         fill=(22, 22, 32, int(0.98 * alpha)),
                         outline=(255, 255, 255, int(0.12 * alpha)), width=1)
     for i, c in enumerate([(255, 95, 86), (255, 189, 46), (39, 201, 63)]):
-        d.ellipse([x + 22 + i * 26, y + 20, x + 36 + i * 26, y + 34],
-                  fill=c + (int(alpha),))
+        d.ellipse([x + 22 + i * 26, y + 20, x + 36 + i * 26, y + 34], fill=c + (int(alpha),))
     base.alpha_composite(layer)
     paste_alpha(base, icon_at(86), (cx, y + 110), alpha)
     text(base, (cx, y + 180), "Prowl", font(40, AV_BOLD), WHITE, alpha)
-    text(base, (cx, y + 222),
-         f"running 02:0{cyc} · {cyc} cycles" if running else "Stopped",
+    text(base, (cx, y + 222), f"running 02:0{cyc} · {cyc} cycles",
          font(24, AV_MED), SUB, alpha)
-    layer2 = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    d2 = ImageDraw.Draw(layer2)
-    d2.rounded_rectangle([x + 70, y + 260, x + 230, y + 318], radius=12,
-                         fill=GREEN + (int(alpha),))
-    d2.rounded_rectangle([x + 290, y + 260, x + 450, y + 318], radius=12,
-                         fill=RED + (int(alpha),))
-    base.alpha_composite(layer2)
+    l2 = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    d2 = ImageDraw.Draw(l2)
+    d2.rounded_rectangle([x + 70, y + 260, x + 230, y + 318], radius=12, fill=GREEN + (int(alpha),))
+    d2.rounded_rectangle([x + 290, y + 260, x + 450, y + 318], radius=12, fill=RED + (int(alpha),))
+    base.alpha_composite(l2)
     text(base, (x + 150, y + 289), "START", font(26, AV_BOLD), (10, 30, 18), alpha)
     text(base, (x + 370, y + 289), "STOP", font(26, AV_BOLD), (40, 12, 12), alpha)
 
@@ -251,98 +279,102 @@ def menubar(base, alpha, glyph_char, count=None):
         text(base, (gx + 46, 26), str(count), font(28, AV_BOLD), WHITE, alpha)
 
 
-# ---------- scenes (s = local seconds, D = scene duration) ----------
+# ---------- scenes ----------
 def scene_intro(img, s, D):
-    sc = ease(min(1.0, s / 0.9))
-    size = int(170 + 210 * sc)
-    if 0.85 < s < 1.4:
-        size += int(20 * math.sin((s - 0.85) / 0.55 * math.pi))
+    sc = pop_scale(s, 0.0, 0.6)
+    size = int(380 * max(0.2, sc))
     paste_alpha(img, icon_at(max(40, size)), (W // 2, H // 2 - 60),
-                255 * min(1.0, s / 0.85) * fade(s, D, 0, 0.01, 0.5))
-    text(img, (W // 2, H // 2 + 175), "Meet Prowl", font(110, AV_BOLD),
-         WHITE, 255 * fade(s, D, 0.7, 0.5, 0.5))
+                255 * min(1.0, s / 0.5) * fade(s, D, 0, 0.01, 0.45))
+    text(img, (W // 2, H // 2 + 185), "This is Prowl", font(112, AV_BOLD),
+         WHITE, 255 * fade(s, D, 0.5, 0.3, 0.45), pop_scale(s, 0.5))
 
 
 def scene_problem(img, s, D):
-    lines = [("You step away…", 0.3, WHITE),
-             ("your Mac falls asleep.", 1.4, WHITE),
-             ("SSH drops.  Tasks die.", 2.6, RED)]
-    for txt, t0, col in lines:
-        text(img, (W // 2, H // 2 - 130 + lines.index((txt, t0, col)) * 135),
-             txt, font(66, AV_DEMI), col, 255 * fade(s, D, t0, 0.5, 0.4))
+    rows = [("Mac sleeps.", 0.15, WHITE),
+            ("SSH drops.", 0.85, WHITE),
+            ("Work dies.", 1.55, RED)]
+    for i, (txt, t0, col) in enumerate(rows):
+        a = 255 * fade(s, D, t0, 0.25, 0.35)
+        text(img, (W // 2, H // 2 - 150 + i * 150), txt, font(86, AV_BOLD),
+             col, a, pop_scale(s, t0, 0.35))
 
 
 def scene_solution(img, s, D):
     def path(u):
         cx, cy, r = W * 0.5, H * 0.40, 360
-        a = u * math.pi * 2.2
+        a = u * math.pi * 2.4
         return (cx + r * math.cos(a) * 1.5, cy + r * math.sin(a) * 0.7)
-    u = ease(min(1.0, (s - 0.2) / (D - 1.0)))
+    u = ease(min(1.0, (s - 0.1) / (D - 0.9)))
     cx_, cy_ = path(u)
-    trail(img, path, u, 255 * fade(s, D, 0.1, 0.4, 0.6))
-    cursor(img, cx_, cy_, 0.32, 255 * fade(s, D, 0.1, 0.3, 0.6))
-    text(img, (W // 2, H // 2 + 200), "Prowl keeps it awake.",
-         font(86, AV_BOLD), WHITE, 255 * fade(s, D, 0.5, 0.5, 0.5))
-    text(img, (W // 2, H // 2 + 300),
-         "a gentle nudge of the cursor, every minute — never a click",
-         font(38, AV_MED), SUB, 255 * fade(s, D, 1.1, 0.6, 0.5))
+    trail(img, path, u, 255 * fade(s, D, 0.05, 0.3, 0.5))
+    cursor(img, cx_, cy_, 0.32, 255 * fade(s, D, 0.05, 0.25, 0.5))
+    text(img, (W // 2, H // 2 + 200), "Keeps it awake.", font(92, AV_BOLD),
+         WHITE, 255 * fade(s, D, 0.35, 0.3, 0.45), pop_scale(s, 0.35))
+    text(img, (W // 2, H // 2 + 305), "one nudge a minute · never a click",
+         font(38, AV_MED), ACCENT, 255 * fade(s, D, 0.9, 0.4, 0.45))
 
 
 def scene_menubar(img, s, D):
-    cyc = max(1, min(3, int((s - 1.0) / 1.0) + 1)) if s > 1.0 else 1
-    glyph = "🐭" if s < 0.9 else "🐾"
-    show_count = None if s < 0.9 else cyc
-    a = 255 * fade(s, D, 0.0, 0.5, 0.5)
-    menubar(img, a, glyph, show_count)
-    menu_dropdown(img, W - 260 - 380 + 70, 70, 255 * fade(s, D, 0.5, 0.5, 0.5), cyc)
-    text(img, (560, 360), "Lives in your menu bar", font(64, AV_BOLD),
-         WHITE, 255 * fade(s, D, 0.4, 0.5, 0.5))
-    text(img, (560, 470), "Click Start — every spin counts:", font(40, AV_MED),
-         (225, 228, 240), 255 * fade(s, D, 1.0, 0.5, 0.5))
-    if s > 1.0:
-        big = "🐾  " + " ".join(str(i) for i in range(1, cyc + 1))
-        text(img, (560, 600), big.replace("🐾  ", ""), font(120, AV_BOLD),
-             ACCENT, 255 * fade(s, D, 1.0, 0.4, 0.5))
-    text(img, (560, 720), "resets to 1 each time you Start", font(32, AV_IT),
-         SUB, 255 * fade(s, D, 1.6, 0.6, 0.5))
+    cyc = max(1, min(3, int((s - 0.9) / 0.85) + 1)) if s > 0.9 else 1
+    glyph = "🐭" if s < 0.8 else "🐾"
+    a = 255 * fade(s, D, 0.0, 0.4, 0.45)
+    menubar(img, a, glyph, None if s < 0.8 else cyc)
+    menu_dropdown(img, W - 260 - 380 + 70, 70, 255 * fade(s, D, 0.4, 0.4, 0.45), cyc)
+    text(img, (560, 330), "Lives in your menu bar", font(60, AV_BOLD),
+         WHITE, 255 * fade(s, D, 0.3, 0.3, 0.45), pop_scale(s, 0.3, 0.35))
+    text(img, (560, 440), "every spin counts:", font(40, AV_MED),
+         (225, 228, 240), 255 * fade(s, D, 0.8, 0.4, 0.45))
+    if s > 0.9:
+        big = " ".join(str(i) for i in range(1, cyc + 1))
+        # the newest number pops
+        text(img, (560, 580), big, font(130, AV_BOLD), ACCENT,
+             255 * fade(s, D, 0.9, 0.2, 0.45),
+             pop_scale(s, 0.9 + (cyc - 1) * 0.85, 0.3))
+    text(img, (560, 700), "resets to 1 each Start", font(32, AV_IT),
+         SUB, 255 * fade(s, D, 1.5, 0.5, 0.45))
 
 
 def scene_options(img, s, D):
-    text(img, (W // 2, 250), "Runs your way", font(72, AV_BOLD),
-         WHITE, 255 * fade(s, D, 0.2, 0.5, 0.5))
-    window_mock(img, W * 0.32, H * 0.60, 255 * fade(s, D, 0.6, 0.5, 0.5))
-    # menu-bar mini + share note on the right
+    text(img, (W // 2, 235), "Runs your way", font(72, AV_BOLD),
+         WHITE, 255 * fade(s, D, 0.1, 0.3, 0.45), pop_scale(s, 0.1))
+    window_mock(img, W * 0.32, H * 0.60, 255 * fade(s, D, 0.5, 0.4, 0.45))
     rx = W * 0.72
-    paste_alpha(img, emoji_img("🐾", 90), (rx, H * 0.50),
-                255 * fade(s, D, 1.0, 0.5, 0.5))
-    text(img, (rx, H * 0.50 + 90), "menu-bar widget", font(36, AV_MED),
-         (225, 228, 240), 255 * fade(s, D, 1.0, 0.5, 0.5))
-    text(img, (rx, H * 0.68), "Share the app", font(44, AV_DEMI),
-         WHITE, 255 * fade(s, D, 1.6, 0.5, 0.5))
-    text(img, (rx, H * 0.68 + 56), "with your whole team", font(36, AV_MED),
-         SUB, 255 * fade(s, D, 1.6, 0.5, 0.5))
+    paste_scaled(img, emoji_img("🐾", 92), (rx, H * 0.48),
+                 255 * fade(s, D, 0.8, 0.4, 0.45), pop_scale(s, 0.8, 0.35))
+    text(img, (rx, H * 0.48 + 92), "menu-bar widget", font(36, AV_MED),
+         (225, 228, 240), 255 * fade(s, D, 0.8, 0.4, 0.45))
+    text(img, (rx, H * 0.66), "Share with", font(46, AV_DEMI),
+         WHITE, 255 * fade(s, D, 1.2, 0.4, 0.45))
+    text(img, (rx, H * 0.66 + 58), "your whole team", font(46, AV_DEMI),
+         ACCENT, 255 * fade(s, D, 1.35, 0.4, 0.45))
 
 
 def scene_outro(img, s, D):
-    a = 255 * fade(s, D, 0.2, 0.6, 0.0)
-    paste_alpha(img, icon_at(290), (W // 2, H // 2 - 110), a)
-    text(img, (W // 2, H // 2 + 120), "Prowl", font(118, AV_BOLD), WHITE, a)
-    text(img, (W // 2, H // 2 + 220), "keeps your Mac awake.",
-         font(46, AV_MED), SUB, a)
-    text(img, (W // 2, H - 90), "github.com/alvi75/Prowl",
-         font(34, AV_DEMI), ACCENT, 255 * fade(s, D, 0.9, 0.7, 0.0))
+    a = 255 * fade(s, D, 0.15, 0.5, 0.0)
+    paste_scaled(img, icon_at(290), (W // 2, H // 2 - 120), a, pop_scale(s, 0.1, 0.5))
+    text(img, (W // 2, H // 2 + 110), "Prowl", font(120, AV_BOLD), WHITE, a,
+         pop_scale(s, 0.35))
+    text(img, (W // 2, H // 2 + 215), "stay awake · keep working",
+         font(44, AV_MED), SUB, 255 * fade(s, D, 0.7, 0.4, 0.0))
+    text(img, (W // 2, H - 85), "github.com/alvi75/Prowl",
+         font(34, AV_DEMI), ACCENT, 255 * fade(s, D, 1.1, 0.5, 0.0))
 
 
-SCENE_FN = {"intro": scene_intro, "problem": scene_problem,
-            "solution": scene_solution, "menubar": scene_menubar,
-            "options": scene_options, "outro": scene_outro}
+SCENE_FN = {"intro": scene_intro, "problem": scene_problem, "solution": scene_solution,
+            "menubar": scene_menubar, "options": scene_options, "outro": scene_outro}
 
 
 def draw_frame(t, starts, durs):
     img = BG.copy()
+    # drifting glows (motion in every scene)
+    gx = W * 0.5 + math.sin(t * 0.55) * 360
+    gy = H * 0.42 + math.cos(t * 0.42) * 230
+    paste_alpha(img, GLOW_B, (gx, gy), 175)
+    px = W * 0.5 + math.cos(t * 0.4 + 1.5) * 420
+    py = H * 0.55 + math.sin(t * 0.5 + 1.0) * 240
+    paste_alpha(img, GLOW_P, (px, py), 120)
     for i, name in enumerate(SCENE_NAMES):
-        if starts[i] <= t < starts[i] + durs[i] or (i == len(SCENE_NAMES) - 1
-                                                     and t >= starts[i]):
+        if starts[i] <= t < starts[i] + durs[i] or (i == len(SCENE_NAMES) - 1 and t >= starts[i]):
             SCENE_FN[name](img, t - starts[i], durs[i])
             break
     return img.convert("RGB")
@@ -356,18 +388,14 @@ def ffprobe_dur(path):
 
 
 def build_voice(durs):
-    """Per-scene narration padded to scene length, concatenated -> voice.wav."""
     scene_wavs = []
     for i in range(len(NARRATION)):
-        aiff = f"/tmp/prowl_vo_{i}.aiff"
-        wav = f"/tmp/prowl_scene_{i}.wav"
-        subprocess.run(["say", "-v", "Samantha", "-r", "172", "-o", aiff,
-                        NARRATION[i]], check=True)
-        # pad with trailing silence to exactly the scene duration
-        subprocess.run(["ffmpeg", "-y", "-i", aiff, "-af", "apad",
-                        "-t", f"{durs[i]:.3f}", "-ar", "44100", "-ac", "2",
-                        wav], check=True, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+        aiff, wav = f"/tmp/prowl_vo_{i}.aiff", f"/tmp/prowl_scene_{i}.wav"
+        subprocess.run(["say", "-v", "Samantha", "-r", "188", "-o", aiff, NARRATION[i]],
+                       check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", aiff, "-af", "apad", "-t", f"{durs[i]:.3f}",
+                        "-ar", "44100", "-ac", "2", wav], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         scene_wavs.append(wav)
     listf = "/tmp/prowl_concat.txt"
     with open(listf, "w") as f:
@@ -380,33 +408,53 @@ def build_voice(durs):
     return voice
 
 
+def build_music(total):
+    music = "/tmp/prowl_music.wav"
+    fade_out = max(0.1, total - 2.2)
+    subprocess.run(
+        ["ffmpeg", "-y",
+         "-stream_loop", "-1", "-i", BEAT,
+         "-stream_loop", "-1", "-i", BASS,
+         "-stream_loop", "-1", "-i", SYNTH,
+         "-filter_complex",
+         "[0:a]volume=1.0[b];[1:a]volume=1.0[s];[2:a]volume=0.8[y];"
+         "[b][s][y]amix=inputs=3:duration=longest:normalize=0,"
+         f"afade=t=in:st=0:d=0.8,afade=t=out:st={fade_out:.2f}:d=2.2[m]",
+         "-map", "[m]", "-t", f"{total:.3f}", "-ar", "44100", "-ac", "2", music],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return music
+
+
 def main():
-    # 1) narration -> per-scene durations
     raw = []
     for i in range(len(NARRATION)):
         aiff = f"/tmp/prowl_vo_{i}.aiff"
-        subprocess.run(["say", "-v", "Samantha", "-r", "172", "-o", aiff,
-                        NARRATION[i]], check=True)
+        subprocess.run(["say", "-v", "Samantha", "-r", "188", "-o", aiff, NARRATION[i]],
+                       check=True)
         raw.append(ffprobe_dur(aiff))
     durs = [raw[i] + PAD[i] for i in range(len(raw))]
     starts = [sum(durs[:i]) for i in range(len(durs))]
     total = sum(durs)
-    print(f"scene durations: {[round(d,1) for d in durs]}  total={total:.1f}s")
+    print(f"durations {[round(d,1) for d in durs]} total={total:.1f}s")
 
-    # 2) voice track
     voice = build_voice(durs)
+    music = build_music(total)
 
-    # 3) render frames -> ffmpeg, mux voice
     out = os.path.join(HERE, "prowl_launch.mp4")
     nframes = int(total * FPS)
+    # music ducks under the voice via sidechain compression
+    afilter = (
+        "[1:a]asplit=2[vk][vm];"
+        "[2:a][vk]sidechaincompress=threshold=0.03:ratio=8:attack=12:release=320[duck];"
+        "[vm][duck]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[a]"
+    )
     cmd = ["ffmpeg", "-y",
-           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-           "-r", str(FPS), "-i", "-",
-           "-i", voice,
-           "-map", "0:v", "-map", "1:a",
-           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
-           "-preset", "medium", "-c:a", "aac", "-b:a", "192k",
-           "-shortest", "-movflags", "+faststart", out]
+           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
+           "-i", voice, "-i", music,
+           "-filter_complex", afilter,
+           "-map", "0:v", "-map", "[a]",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "medium",
+           "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", out]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for i in range(nframes):
