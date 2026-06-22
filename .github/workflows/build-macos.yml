@@ -1,0 +1,48 @@
+name: Build macOS App
+
+# Builds Prowl.app on a macOS runner and uploads it (zipped) as an artifact.
+# Download it from the run's "Artifacts" section.
+# Note: the app is ad-hoc signed (not notarized), so on first launch users run
+# `xattr -dr com.apple.quarantine Prowl.app` and grant Accessibility. See README.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "prowl_core.py"
+      - "prowl_menubar.py"
+      - "prowl_window.py"
+      - "make_icon.py"
+      - "setup.py"
+      - "build_app.sh"
+      - "icon.icns"
+      - ".github/workflows/build-macos.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyobjc-framework-Quartz rumps py2app pillow
+
+      - name: Build Prowl.app
+        run: |
+          chmod +x build_app.sh
+          ./build_app.sh
+
+      - name: Zip the app
+        run: cd dist && zip -r -y Prowl-macOS.zip Prowl.app
+
+      - name: Upload Prowl-macOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prowl-macOS
+          path: dist/Prowl-macOS.zip
+          if-no-files-found: error

@@ -32,6 +32,52 @@ The packaged **Prowl.app** is the menu-bar widget — double-clickable, with an
 icon, ready to hand to teammates. It isn't committed to the repo (it's an 81 MB
 bundle); run `./build_app.sh` to produce `dist/Prowl.app`, then share that.
 
+> The three options above are **macOS**. For **Windows**, see below.
+
+---
+
+## Windows
+
+A separate, self-contained Windows version lives in [`windows/`](windows/) — the
+macOS code is untouched. On Windows **no special permission is needed** to move
+the cursor, so it just works.
+
+CI (GitHub **Actions** tab → **"Build Windows EXE"** → latest run → **Artifacts**)
+produces two downloads — pick one:
+
+- **`Prowl-Windows-Installer`** → **`Prowl-Setup.exe`** — installs like normal
+  software: Start Menu shortcut, optional desktop icon, optional "start with
+  Windows," and an uninstaller in Add/Remove Programs. Per-user, **no admin
+  needed**.
+- **`Prowl-Windows-Portable`** → **`Prowl.exe`** — single file, just double-click
+  to run, nothing installed.
+
+Either way: run it → click **START**. (Windows SmartScreen may warn "unknown
+publisher" since it isn't code-signed → **More info → Run anyway**.)
+
+**From source (if you have Python 3):**
+```bat
+cd windows
+python prowl_window.py        REM or double-click "Run Prowl.bat"
+```
+
+**Build locally on Windows:**
+```bat
+cd windows
+build_exe.bat                 REM -> windows\dist\Prowl.exe
+```
+
+The Windows build uses Win32 `SendInput` (via `ctypes`) and also asks Windows to
+keep the display/system awake while running.
+
+### Download for macOS
+
+Friends on a Mac can grab a prebuilt app too: **Actions** tab → **"Build macOS
+App"** → latest run → **Artifacts** → **`Prowl-macOS`** (a zipped `Prowl.app`).
+First launch needs `xattr -dr com.apple.quarantine Prowl.app` and granting
+Accessibility (see the permission section above) — and note the un-notarized app
+caveat: running via the `.command` is the most reliable route.
+
 ---
 
 ## Quick start (from source)
