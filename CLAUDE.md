@@ -113,6 +113,17 @@ are gitignored.
   not on PATH). Fixed in `build_exe.bat`.
 - Unsigned exe → SmartScreen "unknown publisher" → More info → Run anyway. A
   code-signing cert would remove this (roadmap).
+- "**Prowls one cycle then freezes (counter keeps climbing, cursor stops)**":
+  the loop is fine (identical to mac); `SendInput` was silently no-op'ing after
+  the first burst. `windows/prowl_core.py` was hardened: process is made
+  DPI-aware (un-virtualized coords), moves use the *virtual* desktop with
+  `MOUSEEVENTF_VIRTUALDESK | MOVE_NOCOALESCE`, every `SendInput` return +
+  `GetLastError` is checked and counted, a relative-move fallback runs if an
+  absolute move is rejected, and keep-awake is asserted from the worker thread
+  (per-thread state) each cycle. On rejection the UI now shows
+  `⚠ Cursor move blocked (err N)` — if that appears, the OS is dropping
+  synthetic input (UIPI: foreground window is elevated → run Prowl as admin; or
+  full-screen-exclusive/secure-desktop has focus). Verify on a real Windows box.
 
 **Corporate machines**
 - A mouse jiggler on a managed PC (e.g. user's Halliburton laptop) may violate IT
