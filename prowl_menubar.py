@@ -52,7 +52,7 @@ class ProwlApp(rumps.App):
 
         if not can_move():
             self.status_item.title = (
-                "Status: Accessibility stale — re-grant Terminal →"
+                "Status: Accessibility stale — re-grant in Settings →"
                 if is_trusted() else "Status: grant Accessibility →")
             self._prompt_accessibility()
 
@@ -102,9 +102,10 @@ class ProwlApp(rumps.App):
                 self._prompt_accessibility()
                 rumps.alert(
                     "Accessibility needed",
-                    "Turn ON Terminal in the pane that just opened (not 'Prowl'), "
-                    "then click Start again. If Terminal is already ON but Prowl "
-                    "still won't run, run fix_mac.command once.")
+                    "In the pane that just opened, turn ON the highlighted entry "
+                    "(Prowl if you launched the app, or Terminal if you used "
+                    "Launch Prowl.command), then click Start again. Still stuck? "
+                    "Run fix_mac.command once.")
                 return
             self.want_running = True
             self.engine.start()

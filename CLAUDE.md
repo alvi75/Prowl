@@ -18,7 +18,8 @@ prowl_menubar.py     macOS menu-bar widget (rumps) — the primary daily app
 prowl_window.py      macOS Tkinter Start/Stop window
 make_icon.py         generates icon.icns (+ windows ico is made from icon_1024.png)
 setup.py             py2app config for building Prowl.app
-build_app.sh         one-command macOS build -> dist/Prowl.app
+build_app.sh         one-command macOS build -> dist/Prowl.app (heavy standalone, for sharing)
+make_launcher_app.sh builds a TINY Spotlight-launchable /Applications/Prowl.app (personal)
 Launch Prowl.command double-click launcher (runs menubar via Terminal; see gotchas)
 fix_mac.sh           one-shot Accessibility fixer (fix_mac.command = double-click copy)
 icon.icns            macOS app icon
@@ -68,6 +69,17 @@ are gitignored.
 - macOS menu-bar: `pip3 install rumps pyobjc-framework-Quartz && python3 prowl_menubar.py`
 - macOS window: `python3 prowl_window.py`
 - Windows window: `cd windows && python prowl_window.py` (only stdlib needed)
+
+### Personal Spotlight-launchable app (the daily driver on the dev's own Mac)
+- `./make_launcher_app.sh` builds a **tiny** `/Applications/Prowl.app` (NOT the
+  heavy py2app bundle) — a signed wrapper whose executable finds a Python with
+  deps via absolute paths and `exec`s `prowl_menubar.py` from `~/Prowl`. Launch
+  with **Cmd-Space → "Prowl"**. The responsible TCC identity is the `.app` itself
+  (`com.zahidul.prowl`), so grant **Prowl** once and it sticks (ad-hoc cdhash is
+  stable as long as you don't rebuild; rebuilding = one re-grant). This is the
+  personal-convenience path; `Launch Prowl.command` (grant Terminal) remains the
+  zero-build fallback. `build_app.sh`'s standalone bundle is only for sharing to
+  Macs without Python.
 
 ### Build locally
 - macOS app: `./build_app.sh` → `dist/Prowl.app`
