@@ -15,10 +15,14 @@ AppKit — doing so would freeze the menu (Start/Stop/Quit stop responding).
 
 import rumps
 
-from prowl_core import ProwlEngine, can_move
+import subprocess
+
+from prowl_core import ProwlEngine, can_move, is_trusted, request_accessibility
 
 IDLE_TITLE = "🐭"        # menu-bar glyph when idle
 RUN_TITLE = "🐾"         # menu-bar glyph while prowling
+# Deep-link straight to System Settings → Privacy & Security → Accessibility.
+AX_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 
 
 class ProwlApp(rumps.App):
@@ -26,6 +30,7 @@ class ProwlApp(rumps.App):
         super().__init__("Prowl", title=IDLE_TITLE, quit_button=None)
         self.engine = ProwlEngine()          # NO cross-thread callback
         self.want_running = False            # user intent
+        self._asked = False                  # fire the native AX prompt once/launch
 
         self.toggle_item = rumps.MenuItem("Start Prowling", callback=self.toggle)
         self.status_item = rumps.MenuItem("Status: stopped", callback=None)
@@ -46,15 +51,22 @@ class ProwlApp(rumps.App):
         self._mark_interval()
 
         if not can_move():
-            self.status_item.title = "Status: grant Accessibility →"
-            rumps.notification(
-                "Prowl needs permission",
-                "Enable Accessibility, then reopen Prowl",
-                "System Settings → Privacy & Security → Accessibility.")
+            self.status_item.title = (
+                "Status: Accessibility stale — re-grant Terminal →"
+                if is_trusted() else "Status: grant Accessibility →")
+            self._prompt_accessibility()
 
         # main-thread UI refresher (thread-safe). 0.5s cadence.
         self._timer = rumps.Timer(self._refresh, 0.5)
         self._timer.start()
+
+    # ---- accessibility prompt (native one-click, at most once per launch) ----
+    def _prompt_accessibility(self):
+        if self._asked:
+            return
+        self._asked = True
+        request_accessibility()                       # native one-click dialog
+        subprocess.Popen(["open", AX_PANE])           # deep-link to the pane
 
     # ---- interval handling ----
     def _make_interval_setter(self, secs):
@@ -87,10 +99,12 @@ class ProwlApp(rumps.App):
             self.engine.stop()
         else:
             if not can_move():
+                self._prompt_accessibility()
                 rumps.alert(
                     "Accessibility needed",
-                    "Enable Prowl under System Settings → Privacy & Security "
-                    "→ Accessibility, then reopen Prowl.")
+                    "Turn ON Terminal in the pane that just opened (not 'Prowl'), "
+                    "then click Start again. If Terminal is already ON but Prowl "
+                    "still won't run, run fix_mac.command once.")
                 return
             self.want_running = True
             self.engine.start()

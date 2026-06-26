@@ -12,6 +12,8 @@ Both the window app (prowl_window.py) and the menu-bar widget
 (prowl_menubar.py) drive this ProwlEngine.
 """
 
+import ctypes
+import ctypes.util
 import random
 import threading
 import time
@@ -38,6 +40,49 @@ def post_move(x, y):
         None, Quartz.kCGEventMouseMoved, (x, y), Quartz.kCGMouseButtonLeft
     )
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, evt)
+
+
+def is_trusted():
+    """Policy check: does TCC consider our *responsible* process (Terminal on the
+    `Launch Prowl.command` route) Accessibility-trusted?
+
+    This does NOT prove CGEventPost works — use can_move() for real capability.
+    It's used only to tell a *stale* grant (trusted but not working) apart from
+    an *ungranted* one, so the UI can show the right message. Pure ctypes, no
+    extra pip dependency.
+    """
+    try:
+        AS = ctypes.cdll.LoadLibrary(ctypes.util.find_library("ApplicationServices"))
+        AS.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(AS.AXIsProcessTrusted())
+    except Exception:
+        return False
+
+
+def request_accessibility():
+    """Fire the NATIVE one-click Accessibility prompt and register the responsible
+    process (Terminal on the .command route) into the TCC list.
+
+    macOS will NOT let an app silently grant itself Accessibility (TCC.db is
+    SIP-protected) — this is the closest to "auto" that exists: it adds us to the
+    list and shows the system dialog with a deep-link, so the user grants with one
+    click. The dialog shows at most once per responsible app until a tccutil reset.
+    Returns the current trust state. Safe to call repeatedly.
+    """
+    try:
+        AS = ctypes.cdll.LoadLibrary(ctypes.util.find_library("ApplicationServices"))
+        CF = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))
+        CF.CFDictionaryCreate.restype = ctypes.c_void_p
+        kPrompt = ctypes.c_void_p.in_dll(AS, "kAXTrustedCheckOptionPrompt")
+        kTrue = ctypes.c_void_p.in_dll(CF, "kCFBooleanTrue")
+        keys = (ctypes.c_void_p * 1)(kPrompt)
+        vals = (ctypes.c_void_p * 1)(kTrue)
+        opts = CF.CFDictionaryCreate(None, keys, vals, 1, None, None)
+        AS.AXIsProcessTrustedWithOptions.restype = ctypes.c_bool
+        AS.AXIsProcessTrustedWithOptions.argtypes = [ctypes.c_void_p]
+        return bool(AS.AXIsProcessTrustedWithOptions(opts))
+    except Exception:
+        return False
 
 
 def can_move():

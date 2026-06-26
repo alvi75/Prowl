@@ -20,6 +20,7 @@ make_icon.py         generates icon.icns (+ windows ico is made from icon_1024.p
 setup.py             py2app config for building Prowl.app
 build_app.sh         one-command macOS build -> dist/Prowl.app
 Launch Prowl.command double-click launcher (runs menubar via Terminal; see gotchas)
+fix_mac.sh           one-shot Accessibility fixer (fix_mac.command = double-click copy)
 icon.icns            macOS app icon
 
 make_video.py        renders prowl_launch.mp4 (PIL frames -> ffmpeg) + voiceover
@@ -86,14 +87,39 @@ are gitignored.
 ## Gotchas & hard-won lessons (READ before debugging)
 
 **macOS**
-- The **ad-hoc-signed `Prowl.app` CANNOT control the cursor** even with
-  Accessibility granted — un-notarized apps are blocked from input synthesis.
-  Reliable route is **`Launch Prowl.command`** (runs the menubar via Terminal,
-  borrowing Terminal's permission). A **Developer ID signed + notarized** build
-  would fix the `.app` (needs a paid Apple Developer account) — top roadmap item.
-- Ad-hoc signing gives a new cdhash each build, so macOS **drops the Accessibility
-  grant on every rebuild** — must re-add. `tccutil reset Accessibility com.zahidul.prowl`
-  clears stale state.
+- **Accessibility "shows ON but Prowl still can't move the cursor / keeps
+  asking" — the #1 recurring bug.** Root cause is a **stale code-signature
+  binding, NOT notarization.** Input synthesis (`CGEventPost` →
+  `kCGHIDEventTap`) gates on the Accessibility grant **+ a stable code
+  signature** — notarization only governs Gatekeeper/quarantine at first launch.
+  CORRECTION of an earlier wrong lesson here: "un-notarized apps are blocked from
+  input synthesis" is **false**.
+- TCC authorizes against the **responsible process**. On the
+  **`Launch Prowl.command`** route that's **`com.apple.Terminal`** — Apple-signed
+  with a stable Designated Requirement (`anchor apple`), so TCC matches the DR
+  (not the raw cdhash) and **Terminal's grant survives every Prowl rebuild AND
+  macOS Terminal re-signs.** Grant **Terminal** once and it sticks. This is why
+  `Launch Prowl.command` is the **daily driver** — not the `.app`.
+- The ad-hoc `Prowl.app` (`com.zahidul.prowl`) fails because `codesign --sign -`
+  has **no stable DR**: TCC cdhash-matches and the grant goes stale on every
+  rebuild (renders ON, authorizes nothing). That `com.zahidul.prowl` row is the
+  **orphan** the user keeps toggling — ignore/delete it.
+- **Fix when stuck: run `fix_mac.command` once** (double-click, or `bash
+  fix_mac.sh` in Terminal). It clears the stale state, classifies
+  OK/STALE/UNGRANTED, fires the **native one-click prompt**
+  (`AXIsProcessTrustedWithOptions` + `kAXTrustedCheckOptionPrompt`), deep-links
+  the Accessibility pane, and relaunches via the working route.
+  `tccutil reset Accessibility com.zahidul.prowl` is the safe stale-cleanup;
+  resetting **`com.apple.Terminal`** is the heavy fix for "Terminal ON but stale"
+  and requires fully quitting + relaunching Terminal (revokes AX for all terminal
+  tools until re-granted).
+- **`prowl_core.is_trusted()` / `request_accessibility()`** are pure-ctypes (no
+  pip dep). **`can_move()` is the source of truth** for real capability;
+  `is_trusted()` only distinguishes stale-vs-ungranted for messaging. macOS will
+  NOT let an app silently flip the toggle (TCC.db is SIP-protected) — "auto" =
+  auto-register + native one-click prompt + deep-link + self-heal via `can_move`.
+  Never put `tccutil reset` or `open` in the 0.5s `rumps.Timer`; prompt at most
+  once per launch (`self._asked`).
 - rumps/AppKit is **not thread-safe**: the menu-bar app must update title/menu
   ONLY on the main thread (via `rumps.Timer` polling the engine). Updating from
   the worker thread froze the menu (Start/Stop/Quit unresponsive). Don't regress.
@@ -140,8 +166,16 @@ are gitignored.
 
 ## Roadmap / nice next steps
 
-- **Sign + notarize** the macOS `.app` (fixes cursor control without Terminal) and
-  **code-sign** the Windows exe (removes SmartScreen). Biggest UX wins.
+- **Stable self-signed cert for the `.app`** (no paid account needed): create a
+  Code Signing identity once and switch `build_app.sh` from `--sign -` to
+  `--sign "Prowl Self-Signed"` with a fixed `--identifier`. This gives a
+  cert-leaf-anchored DR that's constant across rebuilds, so a one-time grant of
+  the `.app` itself persists and the Terminal window disappears. Caveats: needs
+  `openssl pkcs12 -legacy` + `security set-key-partition-list` to sign headlessly,
+  **back up the `.p12`** (lose the key → the stale-grant loop returns), sign
+  inside-out (not `--deep`) so the embedded `Python.framework`/`.so`s aren't
+  ad-hoc, and verify `can_move()` from inside the signed bundle before retiring
+  Terminal. **Code-sign** the Windows exe (removes SmartScreen). Biggest UX wins.
 - Windows **system-tray** app (pystray) to mirror the macOS menu-bar widget.
 - Auto-stop after N minutes; pause when the user is actually active; multi-monitor.
 - Tag-driven CI that auto-publishes a Release with all three binaries.
